@@ -9,9 +9,6 @@
 #
 # 换端口：PANEL_PORT=8790 docker compose -f docker-compose.latest.yml up -d
 # 升级：docker compose -f docker-compose.latest.yml pull && … up -d（数据都在卷里，不跟着镜像走）
-# 回滚：Hub 上只有 latest 这一个标签，退不回去 —— 真要能回滚，把 image 换成按 digest 钉住：
-#   image: nuts64/123pan-fastlink-pro@sha256:e54c0b15fdc85a6bcb2aa0588a32d105929e28ebe1f17b756109876f0e340075
-#   （2026-10-16 核过：那一枚 = 1.5.5，amd64 与 arm64 都在，arm 机器不用改任何东西）
 # ============================================================================
 
 name: fastlink-pro
@@ -27,14 +24,16 @@ services:
     ports:
       # 只暴露在本机回环上。要让局域网里别的机器访问，在前面架一个带 TLS 与鉴权的反向代理，别把这里改成 0.0.0.0。
       - "127.0.0.1:${PANEL_PORT:-8770}:8770"
+    user: root
+    network_mode: host
     volumes:
       # 程序的账：任务台账、运行日志、登录后的云盘凭证、界面上存过的设置。
-      - panel-data:/data
+      - /Vol1/docker/123fastlinkpro/data:/data
       # 秒传清单 json 的家：界面上「📁 浏览…」打开就停在这儿，导出的清单也写在这儿。
       # 想直接落在本机某个目录就换成 /home/你/下载/秒传:/mnt/manifests（Windows：D:/123pan/manifests:/mnt/manifests）。
       # ⚠ 容器里只有这两格写得动：面板以普通账号跑，镜像自带的 /media、/root 属于 root，
       #   把清单保存位置填进那里会当场换来一句「清单写不进去：…（EACCES）」。也别指到 /data 里头。
-      - panel-manifests:/mnt/manifests
+      - /Vol1/mnt/fastlink-Json:/mnt/manifests
     # 想在这里预设面板的用户名与口令就放开下面三行 —— 这里是明文，docker inspect 读得到；
     # 而且每次启动都按它重设一次，界面上那张「容器访问门」卡改的用户名/密码会被换回来。
     # 推荐什么也不填：第一次打开用日志里那行一次性口令现设，之后都在界面里改。
@@ -52,20 +51,8 @@ services:
         max-file: "3"
 
 volumes:
-  panel-data:
-  panel-manifests:
-
-# 想接着用你以前那台（docker run 起的）的数据，就别新建卷，改成引用已有的那两个名字：
-#   volumes:
-#     - fastlink-data:/data
-#     - fastlink-manifests:/mnt/manifests
-# 并把上面顶层 volumes 那两行换成：
-#   volumes:
-#     fastlink-data:
-#       external: true
-#     fastlink-manifests:
-#       external: true
-# （不改的话 compose 会新建 fastlink-pro_panel-data 这样的一对空卷，台账与云盘凭证都不会自己搬过来。）
+  fastlink-data:
+  fastlink-manifests:
 
 # 收尾几条：
 #   docker compose -f docker-compose.latest.yml ps            STATUS 里的 healthy 是容器自己在报活
