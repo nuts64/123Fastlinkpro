@@ -1,0 +1,75 @@
+# ============================================================================
+# 秒传Pro 面板 · 从 Docker Hub 拉最新的标准编排
+#
+# 用法（在本目录）：
+#   docker compose -f docker-compose.latest.yml up -d      启动（每次都会先向 Hub 核对最新）
+#   docker compose -f docker-compose.latest.yml logs panel 第一次启动这里有一行「首次设置口令」
+#   浏览器打开 http://127.0.0.1:8770 ，把用户名、口令和那一行一起填进「首次设置」卡（口令只用一次）
+#   之后在「凭证登录」那一页登录云盘：容器里没有浏览器，用「账号密码登录（不需要浏览器）」或扫码那一格
+#
+# 换端口：PANEL_PORT=8790 docker compose -f docker-compose.latest.yml up -d
+# 升级：docker compose -f docker-compose.latest.yml pull && … up -d（数据都在卷里，不跟着镜像走）
+# 回滚：Hub 上只有 latest 这一个标签，退不回去 —— 真要能回滚，把 image 换成按 digest 钉住：
+#   image: nuts64/123pan-fastlink-pro@sha256:e54c0b15fdc85a6bcb2aa0588a32d105929e28ebe1f17b756109876f0e340075
+#   （2026-10-16 核过：那一枚 = 1.5.5，amd64 与 arm64 都在，arm 机器不用改任何东西）
+# ============================================================================
+
+name: fastlink-pro
+
+services:
+  panel:
+    image: nuts64/123pan-fastlink-pro:latest
+    # 每次 up 都先向 Hub 核对一次 latest；Hub 抽风/离线时这一次启动会失败（宁可失败，也别悄悄跑着旧的一份）。
+    pull_policy: always
+    # 别加 platform: —— 这一枚是双架构，钉死就等于把挑架构的权利从 Docker 手里抢走。
+    # 这里故意不写 container_name：容器由 compose 按 <项目名>-panel-1 起名，子命令一律用服务名 panel 就够，
+    # 和机器上已经在跑的那台 fastlink-panel 撞不上名字（撞端口是可配的，撞名字是直接起不来）。
+    ports:
+      # 只暴露在本机回环上。要让局域网里别的机器访问，在前面架一个带 TLS 与鉴权的反向代理，别把这里改成 0.0.0.0。
+      - "127.0.0.1:${PANEL_PORT:-8770}:8770"
+    volumes:
+      # 程序的账：任务台账、运行日志、登录后的云盘凭证、界面上存过的设置。
+      - panel-data:/data
+      # 秒传清单 json 的家：界面上「📁 浏览…」打开就停在这儿，导出的清单也写在这儿。
+      # 想直接落在本机某个目录就换成 /home/你/下载/秒传:/mnt/manifests（Windows：D:/123pan/manifests:/mnt/manifests）。
+      # ⚠ 容器里只有这两格写得动：面板以普通账号跑，镜像自带的 /media、/root 属于 root，
+      #   把清单保存位置填进那里会当场换来一句「清单写不进去：…（EACCES）」。也别指到 /data 里头。
+      - panel-manifests:/mnt/manifests
+    # 想在这里预设面板的用户名与口令就放开下面三行 —— 这里是明文，docker inspect 读得到；
+    # 而且每次启动都按它重设一次，界面上那张「容器访问门」卡改的用户名/密码会被换回来。
+    # 推荐什么也不填：第一次打开用日志里那行一次性口令现设，之后都在界面里改。
+    # environment:
+    #   FASTLINK_ADMIN_USER: "admin"
+    #   FASTLINK_ADMIN_PASSWORD: "换成你自己的长口令"
+    # 同理，别在这里用 FASTLINK_* 钉死界面上能改的东西（环境变量优先级高于界面上存过的那一份，钉了就不给改了）。
+    mem_limit: 1g      # 镜像里 node 的堆上限是 512 MB，整个容器留 1 GB 余量
+    cpus: 2
+    restart: unless-stopped   # 机器/Docker 重启后自己回来；队列不会自己开着跑（真实秒传不可撤销，重启后停在「已暂停」等人点）
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"       # 面板的账在 /data 里，容器日志只是 stdout 那一份，别让它把磁盘吃掉
+        max-file: "3"
+
+volumes:
+  panel-data:
+  panel-manifests:
+
+# 想接着用你以前那台（docker run 起的）的数据，就别新建卷，改成引用已有的那两个名字：
+#   volumes:
+#     - fastlink-data:/data
+#     - fastlink-manifests:/mnt/manifests
+# 并把上面顶层 volumes 那两行换成：
+#   volumes:
+#     fastlink-data:
+#       external: true
+#     fastlink-manifests:
+#       external: true
+# （不改的话 compose 会新建 fastlink-pro_panel-data 这样的一对空卷，台账与云盘凭证都不会自己搬过来。）
+
+# 收尾几条：
+#   docker compose -f docker-compose.latest.yml ps            STATUS 里的 healthy 是容器自己在报活
+#   docker compose -f docker-compose.latest.yml cp panel:/mnt/manifests/某份.json ./    把导出的清单取回本机
+#   docker compose -f docker-compose.latest.yml down          删容器、卷留着（数据不动）
+#   ⚠ docker compose -f docker-compose.latest.yml down -v      连卷一起删：台账、云盘凭证、存过的设置全没
+# 重启容器之后要重新登一次面板：会话只在内存里（故意的），口令本身在卷里没丢。
