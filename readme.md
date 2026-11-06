@@ -103,7 +103,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: 123pan-fastlink-panel:latest
+    image: nuts64/123pan-fastlink-pro:latest
     ports:
       - "127.0.0.1:8770:8770"
     volumes:
